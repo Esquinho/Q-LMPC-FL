@@ -461,6 +461,36 @@ class Q_LMPC():
         # Concatenate the tensors
         combined_input_torch = torch.cat(( fh_norm_torch[:-1], delta_setpoint_norm_torch_[:-1]), dim=1)
         combined_input_p1_torch = torch.cat(( fh_norm_torch[1:], delta_setpoint_norm_torch_[1:]), dim=1)
+        
+        #This code is used to collect the unormalized data for the Critic Input
+        """
+        delta_setpoint_unorm_torch_array = delta_setpoint_unorm_torch.reshape(1, -1)
+        fh_unorm_1d = fh_unorm_[1:]).reshape(1, -1)
+        
+        # Stack them together vertically (along rows)
+        new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d])
+        print(f"new_data_1.shape: {new_data_1.shape}")
+
+        # Define the filename
+        file_name_1 = self.cost_file_name
+
+        # Check if the file exists
+        if os.path.exists(file_name_1):
+            # Load the existing data
+            existing_data = np.load(file_name_1)
+            
+            # Append the new data to the existing data
+            updated_data = np.hstack((existing_data, new_data_1))
+            print(f"updated_data.shape: {updated_data.shape}")
+            # Save the updated data back to the file
+            np.save(file_name_1, updated_data)
+            print("DATA UPDATED")
+        else:
+            # If the file doesn't exist, create it by saving the new data
+            np.save(file_name_1, new_data_1)
+            print("DATA CREATED")
+
+        """
 
         Critic_NN_.to(self.Device)
         optimizer_C = torch.optim.SGD(Critic_NN_.parameters(), lr =learning_rate_)
@@ -878,11 +908,17 @@ class Q_LMPC():
                     self.u_3 = self.u_old + 0.08
                 elif (self.u_3 - self.u_old) < -0.08:
                     self.u_3 = self.u_old - 0.08
+            
+            if (self.Dr_3 - self.D_old) > 0.3 + 0.2*PBO_index:
+                self.Dr_3 =  self.D_old + 0.3 + 0.2*PBO_index 
+            elif (self.Dr_3 - self.D_old) < -0.3 - 0.2*PBO_index:
+                self.Dr_3 =  self.D_old - 0.3 - 0.2*PBO_index 
+            
+            if (self.u_3 ) > 0.65:
+                    self.u_3 = 0.65
+            elif (self.u_3 ) < 0.35:
+                    self.u_3 = 0.35
 
-            if (self.Dr_3 - self.D_old) > 0.1 + 0.05*PBO_index[0]:
-                self.Dr_3 =  self.D_old + 0.1 + 0.05*PBO_index[0] 
-            elif (self.Dr_3 - self.D_old) < -0.1 - 0.05*PBO_index[0]:
-                self.Dr_3 =  self.D_old - 0.1 - 0.05*PBO_index[0] 
             print(f"vel: {CARTESIAN_VEL[2]}, pos: {CARTESIAN_POSE[2]} , force: {EXTERNAL_FORCES[2]}")
             print("u_3: ", self.u_3)
             print("D_informatiom:", self.Dr_3)
@@ -981,6 +1017,7 @@ class Q_LMPC():
             self.damping_record_[self.recording_index,0] = np.array([self.Dr_3])
             self.time_record_[self.recording_index,0]= np.array([Timestamp])
 
+            #Code used to save the variables in a .npy file. It records at 6Hz
             """
             new_data = np.column_stack((self.velocity_record_, self.pose_record_, self.force_record_, self.PBO_record_,
                                 self.setpoint_record_, self.damping_record_, self.time_record_))

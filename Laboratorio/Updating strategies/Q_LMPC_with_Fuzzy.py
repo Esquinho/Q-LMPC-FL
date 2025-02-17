@@ -154,7 +154,7 @@ class Q_LMPC():
         self.tictoc = TicToc()
         
         # load data
-        a_file = open("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
+        a_file = open("/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
         self.training_dict = pickle.load(a_file)
         #self.training_dict = torch.load('tensors.pt')
         self.x_mean_v, self.x_std_v, self.y_mean_v, self.y_std_v = self.training_dict['xy_norm']
@@ -178,7 +178,7 @@ class Q_LMPC():
         self.fh_std  = np.std(self.x_std_v[2:3])
         self.fh_norm = (self.fh_mean, self.fh_std)
         
-        self.Cost_norm = np.load("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        self.Cost_norm = np.load("/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
         self.media_costo, self.stad_cost = self.Cost_norm
         
        
@@ -965,7 +965,7 @@ if __name__=='__main__':
     #print(torch.cuda.get_device_name(0))
     #print(torch.cuda.get_device_properties(0))
     # Loading the Data
-    a_file = open("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
+    a_file = open("/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
     training_dict = pickle.load(a_file)
     #training_dict = torch.jit.load('tensors.pt')
     x_mean_v, x_std_v, y_mean_v, y_std_v = training_dict['xy_norm']
@@ -993,12 +993,12 @@ if __name__=='__main__':
     critic = CriticNN()
     
     # Loading the NN models (comment these lines in case you want to perform your own training)
-    #PATH_model0 = "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/model_0"
-    #PATH_model1 = "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/model_1"
-    #PATH_actor = "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/actor"
-    #PATH_critic = "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/critic"
-    #model_approximator["NN0"].load_state_dict(torch.load(PATH_model0))
-    #model_approximator["NN1"].load_state_dict(torch.load(PATH_model1))
+    PATH_model0 = "/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Training/model_0"
+    PATH_model1 = "/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Training/model_1"
+    #PATH_actor = "/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Training/actor"
+    #PATH_critic = "/home/leon/shared_ws/vasco_ws/src/Laboratorio/Updating strategies/Training/critic"
+    model_approximator["NN0"].load_state_dict(torch.load(PATH_model0))
+    model_approximator["NN1"].load_state_dict(torch.load(PATH_model1))
 
     for i in range(num_ensembles):
         model_approximator["NN" + str(i)].to(Device)

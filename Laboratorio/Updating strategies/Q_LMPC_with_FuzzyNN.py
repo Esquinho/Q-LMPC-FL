@@ -15,6 +15,8 @@ from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import WrenchStamped
 from franka_msgs.msg import StampedFloat32
 
+from scipy.optimize import curve_fit
+
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import OrderedDict
@@ -149,7 +151,7 @@ class Q_LMPC():
         
         cartesian_position_sub = message_filters.Subscriber("/franka_ee_pose", PoseStamped, queue_size = 1, buff_size = 2**20) # buffer size = 10, queue = 1
         cartesian_velocity_sub = message_filters.Subscriber("/franka_ee_velocity", TwistStamped, queue_size = 1, buff_size = 2**20)
-        wrench_sub = message_filters.Subscriber("/simulated_wrench", WrenchStamped, queue_size = 1, buff_size = 2**20)
+        wrench_sub = message_filters.Subscriber("/franka_ee_wrench", WrenchStamped, queue_size = 1, buff_size = 2**20)
         pbo_sub = message_filters.Subscriber("/PBO_index",StampedFloat32, queue_size = 1, buff_size = 2**20)
         # Subscription to a certain topic and message type
         self.iter_buffer_ = 0
@@ -165,19 +167,25 @@ class Q_LMPC():
         self.tictoc = TicToc()
         
         # load data
-        a_file = open("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
-        self.training_dict = pickle.load(a_file)
+        b_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl")
+        b_file = open(b_path, "rb")
+
+        self.training_dict = pickle.load(b_file)
         #self.training_dict = torch.load('tensors.pt')
         self.x_mean_v, self.x_std_v, self.y_mean_v, self.y_std_v = self.training_dict['xy_norm']
         self.xn_train = self.training_dict['xn_train']
         self.yn_train = self.training_dict['yn_train']
 
         # load data for the Fuzzy NN
-        b_file = torch.load('/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth')
-        if "normalization" in b_file:
-            self.fuzzy_norm = b_file["normalization"]
-            #print("Mean:", self.fuzzy_norm["mean"])
-            #print("Standard Deviation:", self.fuzzy_norm["std"])
+        PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_NN_parameters_2.pth")
+
+        c_file = torch.load(PATH_fuzzyNN)
+        if "normalization" in c_file:
+            self.fuzzy_norm = c_file["normalization"]
+
+            # Access normalization parameters for input (X)
+            self.mean_X = self.fuzzy_norm["mean"]
+            self.std_X = self.fuzzy_norm["std"]
         else:
             print("Normalization statistics not found in checkpoint.")
         
@@ -198,9 +206,9 @@ class Q_LMPC():
         self.fh_std  = np.std(self.x_std_v[2:3])
         self.fh_norm = (self.fh_mean, self.fh_std)
         
-        self.Cost_norm = np.load("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        c_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        self.Cost_norm = np.load(c_path)
         self.media_costo, self.stad_cost = self.Cost_norm
-
         
         self.loss_history_critic=[]
         self.loss_history_actor=[]
@@ -229,7 +237,7 @@ class Q_LMPC():
         
         self.recording_index = 0
         # Define the directory where you want to save the file
-        directory = os.path.join(os.path.expanduser('~'), 'work_space', 'src','Laboratorio', 'Updating strategies', 'Data')
+        directory = os.path.join(os.path.expanduser('~'), 'shared_ws', 'vasco_ws' , 'src','Q-LMPC-FL', 'Laboratorio', 'Updating strategies', 'Data')
 
         # Ensure the directory exists; if it doesn't, create it
         os.makedirs(directory, exist_ok=True)
@@ -263,8 +271,8 @@ class Q_LMPC():
         ense_ = fh_.shape[0] # 5
         
         # weights
-        Q_= 1
-        R = 5
+        Q_= 2
+        R = 1
         
         cost_fh = (np.sum(np.sum(np.multiply(fh_,fh_)*Q_, axis=2).reshape(ense_, N_), axis=0)/ense_).reshape(N_)
         cost_du = (np.sum(np.sum(np.multiply(delta_u_,delta_u_)*R, axis=2).reshape(ense_, N_), axis=0)/ense_).reshape(N_)
@@ -322,17 +330,14 @@ class Q_LMPC():
         pose_std_ = x_std_v[1]   
         fh_mean_ = x_mean_v[2]
         fh_std_ = x_std_v[2]
-        u_mean_ = self.action_norm[0]
-        u_std_ = self.action_norm[1]
+        u_mean_ = self.x_mean_v[3]
+        u_std_ = self.x_std_v[3]
+        
         #print(f"self.critic_mean.shape: {self.critic_mean.shape}")
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
-        # Fuzzy NN Norm Parameters
-
-        fuzzy_mean = self.fuzzy_norm["mean"]
-        fuzzy_std = self.fuzzy_norm["std"]
 
         Critic_NN_ = Critic_NN
         Nh_ = Nh
@@ -374,22 +379,30 @@ class Q_LMPC():
 
 
         # Calculate Fuzzy Set-point
-        vel_norm_fuzzy = (velocity_unorm_ - fuzzy_mean[0])/fuzzy_std[0]
-        fh_norm_fuzzy = (fh_unorm_ - fuzzy_mean[1])/fuzzy_std[1]
-        dfh_norm_fuzzy = (dft_filtered - fuzzy_mean[2])/fuzzy_std[2]
-        PBO_norm_fuzzy = (PBO_record_- fuzzy_mean[3])/fuzzy_std[3]
+        vel_norm_fuzzy = (velocity_unorm_ - self.mean_X [0])/self.std_X[0]
+        fh_norm_fuzzy = (fh_unorm_ - self.mean_X [1])/self.std_X[1]
+        dfh_norm_fuzzy = (dft_filtered - self.mean_X [2])/self.std_X[2]
+        PBO_norm_fuzzy = (PBO_record_- self.mean_X [3])/self.std_X[3]
+
+        #print(f"vel_norm_fuzzy {vel_norm_fuzzy} and velocity_unorm_ {velocity_unorm_}")
+        #print(f"fh_norm_fuzzy {fh_norm_fuzzy} and fh_unorm_ {fh_unorm_}")
+        #print(f"dfh_norm_fuzzy {dfh_norm_fuzzy} and dft_filtered {dft_filtered}")
+        #print(f"PBO_norm_fuzzy {PBO_norm_fuzzy} and PBO_record_ {PBO_record_}")
 
         fuzzy_input = np.column_stack((vel_norm_fuzzy[1:],fh_norm_fuzzy[1:],dfh_norm_fuzzy,PBO_norm_fuzzy[1:-1]))
 
         fuzzy_input_torch = torch.tensor(fuzzy_input, dtype=torch.float32, device=self.Device)
 
         Fuzzy_NN.eval()
-        fuzzy_setpoint_torch = Fuzzy_NN.forward(fuzzy_input_torch) + pose_unorm_torch_[1:Nh_,:]
+        fuzzy_setpoint_torch = (Fuzzy_NN.forward(fuzzy_input_torch))+ pose_unorm_torch_[1:Nh_,:]
+        
+        #print(f"pose_unorm_torch_[1:Nh_,:]: {pose_unorm_torch_[1:Nh_,:]}")
         #print(f"fuzzy_setpoint_torch: {fuzzy_setpoint_torch}")
+        #print(f"u_unorm_torch[1:Nh_,:]: {u_unorm_torch[1:Nh_,:]}")
 
         delta_setpoint_unorm_torch = (fuzzy_setpoint_torch-u_unorm_torch[1:Nh_,:])
         delta_setpoint_norm_torch = (delta_setpoint_unorm_torch-critic_delta_u_mean)/critic_delta_u_std
-        fh_norm_critic_torch = (fh_unorm_torch - critic_fh_mean)/critic_fh_std
+        fh_norm_critic_torch = (fh_unorm_torch -critic_fh_mean)/critic_fh_std
 
         #print(f"fh_norm_torch: {fh_norm_torch[1:-1]}")
         #print(f"fh_norm_critic_torch: {fh_norm_critic_torch[1:]}")
@@ -401,17 +414,17 @@ class Q_LMPC():
         combined_input_torch = torch.cat(( fh_norm_critic_torch[1:-1], delta_setpoint_norm_torch[:-1]), dim=1)
         combined_input_p1_torch = torch.cat(( fh_norm_critic_torch[2:], delta_setpoint_norm_torch[1:]), dim=1)
 
-        """
+        
         delta_setpoint_unorm_torch_array = delta_setpoint_unorm_torch.detach().numpy().reshape(1, -1)
         fh_unorm_1d = np.squeeze(fh_unorm_[1:]).reshape(1, -1)
 
-        print(f"delta_setpoint_unorm_torch_array: {delta_setpoint_unorm_torch_array[:-1]}")
-        print(f"fh_unorm_1d: {fh_unorm_1d[:-1]}")
+        #print(f"delta_setpoint_unorm_torch_array: {delta_setpoint_unorm_torch_array[:-1]}")
+        #print(f"fh_unorm_1d: {fh_unorm_1d[:-1]}")
 
         
         # Stack them together vertically (along rows)
         new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d])
-        print(f"new_data_1.shape: {new_data_1.shape}")
+        #print(f"new_data_1.shape: {new_data_1.shape}")
 
             # Define the filename
         file_name_1 = self.cost_file_name
@@ -423,16 +436,16 @@ class Q_LMPC():
             
             # Append the new data to the existing data
             updated_data = np.hstack((existing_data, new_data_1))
-            print(f"updated_data.shape: {updated_data.shape}")
+            #print(f"updated_data.shape: {updated_data.shape}")
             # Save the updated data back to the file
             np.save(file_name_1, updated_data)
-            print("DATA UPDATED")
+            #print("DATA UPDATED")
         else:
             # If the file doesn't exist, create it by saving the new data
             np.save(file_name_1, new_data_1)
-            print("DATA CREATED")
+            #print("DATA CREATED")
 
-        """
+        
 
         Critic_NN_.to(self.Device)
         #optimizer_C = torch.optim.Adam(Critic_NN_.get_parameters(), lr =learning_rate_)
@@ -448,13 +461,14 @@ class Q_LMPC():
             Q_n = Critic_NN_.forward(combined_input_torch[j,:])
             Q_npiu1 = Critic_NN_.forward(combined_input_p1_torch[j,:])
             
-            Cost_fh = ((combined_input_torch[j:j+1,0].unsqueeze(0)).detach().numpy()*critic_fh_std + critic_fh_mean).reshape(1,1,1)
-            Cost_du = ((combined_input_torch[j:j+1,1].unsqueeze(0)).detach().numpy()*critic_delta_u_std + critic_delta_u_mean).reshape(1,1,1)
+            Cost_fh = (((combined_input_torch[j:j+1,0].unsqueeze(0)).detach().numpy()*critic_fh_std)+critic_fh_mean).reshape(1,1,1)
+            Cost_du = (((combined_input_torch[j:j+1,1].unsqueeze(0)).detach().numpy()*critic_delta_u_std)+critic_delta_u_mean).reshape(1,1,1)
             
-            COSTO = self.cost_func_p(Cost_fh,Cost_du) # normalization 
-            #print("F", Cost_f_0)
+            COSTO = self.cost_func_p(Cost_fh,Cost_du)/70.82 # normalization 
             del Cost_fh, Cost_du
-            
+            Costo_n = torch.from_numpy(COSTO)
+            print(f"Cost was: {Costo_n}")
+
             Q_Bellman = Q_npiu1 + torch.from_numpy(COSTO)
 
             Error_c = errore_f.forward(Q_n, Q_Bellman)
@@ -553,8 +567,7 @@ class Q_LMPC():
         
         assert(x_initial_.shape[0] == 1)  
         x_mean_v_, x_std_v_, y_mean_v_, y_std_v_ = xy_norm_ # normalization variables
-        fuzzy_mean = self.fuzzy_norm["mean"]
-        fuzzy_std = self.fuzzy_norm["std"]
+
         state_dim_  = x_initial_.shape[1]
         state_action_dim_ = action_dim_ + state_dim_ + 1
         smoothing_rate_ = 0.9 #0.9
@@ -571,11 +584,13 @@ class Q_LMPC():
         mu_matrix_D_  = np.zeros((1, time_horizon_))
         std_matrix_D_ = np.ones((1, time_horizon_))
         PBO_array = np.full((num_ensembles_, num_samples_, 1), PBO_index_)
-
+        
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
+
+        q0, q1, q2, q3, q4, q5 = self.Q_interp
 
         for _ in range(iteration_):
             #rospy.loginfo("Iteration ")
@@ -646,10 +661,10 @@ class Q_LMPC():
                 PBO = PBO_array[:,:,0].reshape(-1)
 
                 #Normalization of the input variables to the Fuzzy_NN
-                velocity_norm_fuzzy = (velocity_tt-fuzzy_mean[0])/fuzzy_std[0]
-                fh_norm_fuzzy = (force_tt-fuzzy_mean[1])/fuzzy_std[1]
-                dfh_norm_fuzzy = ((dforce_filt[:, :, t]-fuzzy_mean[2])/fuzzy_std[2]).squeeze(0)
-                PBO_norm_fuzzy = (PBO-fuzzy_mean[3])/fuzzy_std[3]
+                velocity_norm_fuzzy = (velocity_tt-self.mean_X[0])/self.std_X[0]
+                fh_norm_fuzzy = (force_tt-self.mean_X[1])/self.std_X[1]
+                dfh_norm_fuzzy = ((dforce_filt[:, :, t]-self.mean_X[2])/self.std_X[2]).squeeze(0)
+                PBO_norm_fuzzy = (PBO-self.mean_X[3])/self.std_X[3]
 
                 fuzzy_input = np.column_stack((velocity_norm_fuzzy,fh_norm_fuzzy,dfh_norm_fuzzy,PBO_norm_fuzzy))
                 fuzzy_input_torch = torch.tensor(fuzzy_input, dtype=torch.float32, device=self.Device)
@@ -657,10 +672,11 @@ class Q_LMPC():
                 FuzzyNN.eval()
                 output_action = FuzzyNN.forward(fuzzy_input_torch)
                 fuzzy_action = np.asarray(output_action.detach()) + position_tt.reshape(-1, 1)
-                #print(f"output_action: {output_action}")
+                #print(f"Input was : {velocity_tt[0],force_tt[0],dforce_filt[0,0,t]}, Output was: {output_action[0]}")
                 delta_action = fuzzy_action - action_tt_.T
                 #print(f"fuzzy_action: {fuzzy_action[:5]}; action_tt_: {action_tt_.T[:5]}, delta_action: {delta_action[:5]}")
                 # Creation of the input to the Critic_NN to compute the cost of each sample
+
                 fh_critic_norm = (force_tt-critic_fh_mean)/critic_fh_std
                 delta_critic_norm = (delta_action-critic_delta_u_mean)/critic_delta_u_std
 
@@ -674,13 +690,12 @@ class Q_LMPC():
                 critic_input_norm_ = np.column_stack((fh_critic_norm_reshaped, delta_critic_norm))
 
                 #print(f"critic_input_norm_.shape: {critic_input_norm_.shape}")
-                critic_input_norm_torch_ = torch.tensor(critic_input_norm_,dtype=torch.float32,device=self.Device)
 
-                Critic_NN.eval()
 
-                for j1 in range(0,critic_input_norm_torch_.shape[0]):
+                for j1 in range(0,critic_input_norm_.shape[0]):
                     costi_rete_ = []
-                    costo_rete_[0,j1] = Critic_NN.forward(critic_input_norm_torch_[j1:j1+1,:]).detach().numpy()
+                    costo_rete_[0,j1] = q0 + q1* critic_input_norm_[j1,0] + q2* critic_input_norm_[j1,1] + q3* critic_input_norm_[j1,0]**2 + q4* critic_input_norm_[j1,1]**2 + q5* critic_input_norm_[j1,1] * critic_input_norm_[j1,0]
+
                     costi_rete_.append(costo_rete_[0,j1].item())
                     step_cost_[j1] = (np.sum(costi_rete_)/num_ensembles_cem_)
     
@@ -785,10 +800,20 @@ class Q_LMPC():
     def on_shutdown(self):
         """This function will be called when the ROS node shuts down."""
         #print("Shutting down the controller, plotting the losses...")
-        torch.save(self.actor_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/actor_vasco")
-        torch.save(self.critic_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/critic_vasco")              
-        torch.save(self.NN_ensemble["NN" + str(0)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model0_vasco")
-        torch.save(self.NN_ensemble["NN" + str(1)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model1_vasco")
+
+        actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_vasco_high_nosat.pth")
+        critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_vasco_high_nosat.pth")
+        model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_vasco_high_nosat.pth")
+        model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_vasco_high_nosat.pth")     
+
+        # Save the state dictionaries of the actor and critic models
+        #torch.save(self.actor_NN.state_dict(), actor_path)
+        #torch.save(self.critic_NN.state_dict(), critic_path)
+
+        # Save the state dictionaries of the NN models in the ensemble
+        #torch.save(self.NN_ensemble["NN" + str(0)].state_dict(), model_0)
+        #torch.save(self.NN_ensemble["NN" + str(1)].state_dict(), model_1)
+
         #self.plot_losses()
         print("Models saved successfully!")
 
@@ -856,23 +881,13 @@ class Q_LMPC():
             self.u_3 = (u_D_3_norm[0,0]*self.x_std_v[3] + self.x_mean_v[3]).detach().numpy()
             self.Dr_3 = (u_D_3_norm[0,1]*self.x_std_v[4] + self.x_mean_v[4]).detach().numpy()
             
-            if(wrench.wrench.force.z==0):
-                self.u_3 = self.u_old
-            else:
-                if (self.u_3 - self.u_old) > 0.08:
-                    self.u_3 = self.u_old + 0.08
-                elif (self.u_3 - self.u_old) < -0.08:
-                    self.u_3 = self.u_old - 0.08
+            if (self.u_3 - self.u_old) > 0.04 + PBO_index*0.02:
+                self.u_3 = self.u_old + 0.04 + PBO_index*0.02 
+            elif (self.u_3 - self.u_old) < -0.04 - PBO_index*0.02:
+                self.u_3 = self.u_old - 0.04 - PBO_index*0.02
             
-            if (self.Dr_3 - self.D_old) > 0.3 + 0.2*PBO_index:
-                self.Dr_3 =  self.D_old + 0.3 + 0.2*PBO_index 
-            elif (self.Dr_3 - self.D_old) < -0.3 - 0.2*PBO_index:
-                self.Dr_3 =  self.D_old - 0.3 - 0.2*PBO_index 
+        
             
-            if (self.u_3 ) > 0.65:
-                    self.u_3 = 0.65
-            elif (self.u_3 ) < 0.35:
-                    self.u_3 = 0.35
 
             print(f"vel: {CARTESIAN_VEL[2]}, pos: {CARTESIAN_POSE[2]} , force: {EXTERNAL_FORCES[2]}")
             print("u_3: ", self.u_3)
@@ -990,7 +1005,8 @@ class Q_LMPC():
             
             new_data = np.column_stack((self.velocity_record_, self.pose_record_, self.force_record_, self.PBO_record_,
                                 self.setpoint_record_, self.damping_record_, self.time_record_))
-
+            
+            """
             # Define the filename
             file_name_ = self.file_name
 
@@ -1010,6 +1026,33 @@ class Q_LMPC():
                 np.save(file_name_, new_data)
                 print("DATA CREATED")
 
+            """
+            AAA1 = np.linspace(-15., 15., self.SIZEN) # Fh
+            AAA1_n =  (AAA1-self.critic_mean[1])/self.critic_std[1] 
+            AAA2 = np.linspace(-0.10, 0.10, self.SIZEN)  # Delta set-point
+            AAA2_n =  (AAA2-self.critic_mean[0])/self.critic_std[0] 
+            AAA1, AAA2 = np.meshgrid(AAA1_n, AAA2_n)
+
+            # Reshape them to column vectors
+            AAA1_flat = AAA1.flatten()
+            AAA2_flat = AAA2.flatten()
+
+            # Stack them together as (N, 2)
+            AAA = np.column_stack((AAA1_flat, AAA2_flat))
+            BBB = np.zeros(AAA.shape[0])  # Cost
+            InputAAA = torch.tensor(AAA, dtype=torch.float32)
+
+            # Compute all outputs at once
+            BBB = critic.forward(InputAAA).detach().numpy()
+            BBB = BBB.flatten()
+            print(BBB)
+            
+            try:
+                self.Q_interp, self.covariance = curve_fit(self.poly2d, AAA.T, BBB, p0=[0, 0, 0, 0, 0, 0])
+                #print("Fitting Critic parameters:", Q_interp)
+                #print("Covariance:", covariance)
+            except Exception as e:
+                print(f"Error during curve fitting: {e}")
 
             if abs(fh_threshold) < 0.1:
                 lr_actor = 5e-5
@@ -1029,7 +1072,7 @@ class Q_LMPC():
                 
             rospy.loginfo("After Model Training and before Critic Training")
             self.Critic_train(state_force_norm_tra, u_record_tra, self.time_record, self.PBO_record, self.critic_NN, self.fuzzyNN, self.training_dict['xy_norm'], self.Cost_norm, self.buffer_size, 
-                         learning_rate = 1e-4)
+                         learning_rate = 1e-5)
 
             rospy.loginfo("After Critic Training and before Actor Training")
             
@@ -1077,14 +1120,15 @@ if __name__=='__main__':
     # Node initialization
     rospy.init_node('Q_LMPC', anonymous=True)
     
-    Device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
+    Device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Using {} Device".format(Device))
     
     #torch.cuda.device(0)
     #print(torch.cuda.get_device_name(0))
     #print(torch.cuda.get_device_properties(0))
     # Loading the Data
-    a_file = open("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
+    a_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3dataDict_robot.pkl")
+    a_file = open(a_path, "rb")
     training_dict = pickle.load(a_file)
     #training_dict = torch.jit.load('tensors.pt')
     x_mean_v, x_std_v, y_mean_v, y_std_v = training_dict['xy_norm']
@@ -1097,8 +1141,8 @@ if __name__=='__main__':
     n_d = 5                                         # depth of the hidden layers
     n_h = 512                                       # size of the hidden layers
     num_ensembles = 2                               # number of NN in the ensemble
-    T=3                                             # prediction horizon
-    BS=6                                            # buffer size 
+    T=7                                             # prediction horizon
+    BS=7                                            # buffer size 
     N=64                                            # number of samples
     print_loss = True
     dx = yn_train.shape[1]
@@ -1112,14 +1156,16 @@ if __name__=='__main__':
     actor = ActorNN()
     critic = CriticNN()
     
-    # Loading the NN models (comment these lines in case you want to perform your own training)
-    PATH_model0 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/model_0"
-    PATH_model1 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/model_1"
-    PATH_actor = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/actor_vasco"
-    PATH_critic = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/critic_vasco"
-    PATH_fuzzyNN = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth"
-    model_approximator["NN0"].load_state_dict(torch.load(PATH_model0))
-    model_approximator["NN1"].load_state_dict(torch.load(PATH_model1))
+    actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_vasco_high.pth")
+    critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_vasco_high.pth")
+    model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_vasco_high.pth")
+    model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_vasco_high.pth")     
+
+
+    PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth")
+
+    model_approximator["NN0"].load_state_dict(torch.load(model_0))
+    model_approximator["NN1"].load_state_dict(torch.load(model_1))
 
     for i in range(num_ensembles):
         model_approximator["NN" + str(i)].to(Device)
@@ -1130,8 +1176,8 @@ if __name__=='__main__':
     critic = CriticNN().to(Device)
 
     fuzzy.load_state_dict(torch.load(PATH_fuzzyNN, weights_only=False)["model_state_dict"]) #comment in case you want to perform your own training
-    actor.load_state_dict(torch.load(PATH_actor)) #comment in case you want to perform your own training
-    critic.load_state_dict(torch.load(PATH_critic)) #comment in case you want to perform your own training
+    actor.load_state_dict(torch.load(actor_path)) #comment in case you want to perform your own training
+    critic.load_state_dict(torch.load(critic_path)) #comment in case you want to perform your own training
     
     print("QLMPC controller is starting")
     myController = Q_LMPC(Device, model_approximator, fuzzy, actor, critic, num_ensembles, T, BS, N)

@@ -505,40 +505,6 @@ namespace franka_example_controllers {
         velocity_d_(2) = vel_imp_t(2);
         velocity_d_.tail(3) = w_psp_world;
 
-        ///////////////////Old control///////////////////
-
-        // Eigen::MatrixXd Jpinv(7,6);
-        // Jpinv = jacobian.completeOrthogonalDecomposition().pseudoInverse();
-
-        // // compute control
-        // Eigen::VectorXd tau_imp(7), tau_d(7), tau_nullspace(7);
-
-        // Eigen::MatrixXd NullSpace(7, 7);
-
-        // for (int j = 0; j < 7; ++j)
-        //     tau_nullspace(j) = 0.;
-
-        // NullSpace = Eigen::MatrixXd::Identity(7, 7) - Jpinv * jacobian;
-
-        // Eigen::MatrixXd M_nullspace(7, 7), D_nullspace(7, 7);
-
-        // double mns = 10.;
-        // double kns = 1000.; // last "Roveda" value = 1000
-        // double hns = 1.5; //5
-        // double dns = 2 * hns * mns * pow((kns / mns), 0.5);
-
-        // M_nullspace = mns * Eigen::MatrixXd::Identity(7, 7);
-        // D_nullspace = dns * Eigen::MatrixXd::Identity(7, 7);
-
-        // Eigen::VectorXd dq_filt_Eigen(7);
-        // for (int j = 0; j < 7; ++j)
-        //     dq_filt_Eigen(j) = dq_filt[j];
-        // tau_nullspace = inertia * (NullSpace * (-M_nullspace.inverse() * D_nullspace * dq_filt_Eigen));
-
-        // tau_imp << inertia * (Jpinv * acc_cmd); // once we get the required acceleration, we can obtain the torques 
-        // tau_d << tau_imp + coriolis + tau_nullspace; // + (jacobian.transpose()*ext_wrench);
-
-        ///////////////////Position control///////////////////
         
         for (int j = 0; j < 7; ++j)
                 dq_filt_Eigen(j) = dq_filt_Eigen(j) * digfilt + (1-digfilt) * dq(j);

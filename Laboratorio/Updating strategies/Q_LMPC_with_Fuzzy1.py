@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pickle
-
+from scipy.optimize import curve_fit
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 
@@ -1075,7 +1075,7 @@ class Q_LMPC():
 
             rospy.loginfo("After Critic Training")
             #print("Critic was trained")
-            """
+            
             # Your data preparation steps
             AAA1 = np.linspace(-100., 100., self.SIZEN)  # Fh
             AAA2 = np.linspace(-1., 1., self.SIZEN)  # Delta set-point
@@ -1094,7 +1094,7 @@ class Q_LMPC():
                 #print("Covariance:", covariance)
             except Exception as e:
                 print(f"Error during curve fitting: {e}")
-            """
+            
             self.Actor_train(state_force_norm_tra, self.Upper_limit_u_norm,
                              self.Lower_limit_u_norm, self.Upper_limit_D_norm, self.Lower_limit_D_norm,
                              self.actor_NN, self.NN_ensemble, self.training_dict['xy_norm'], 

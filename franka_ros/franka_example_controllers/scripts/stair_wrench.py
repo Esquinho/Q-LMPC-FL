@@ -13,7 +13,7 @@ class StairPublisherNode:
         
         # Get parameters or use defaults
         self.time_intervals = rospy.get_param('~time_intervals', [4, 4, 4, 4])  # Intervals in seconds
-        self.values = rospy.get_param('~values', [10 , -20, 30,0 ])  # Values to publish
+        self.values = rospy.get_param('~values', [5 , -4, 8, -7 ])  # Values to publish
         
         # Ensure both lists have the same length
         if len(self.time_intervals) != len(self.values):

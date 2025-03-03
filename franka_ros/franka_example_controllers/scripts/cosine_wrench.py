@@ -7,20 +7,18 @@ from std_msgs.msg import Header
 
 def simulated_wrench_function(amplitude, frequency, phase_1, phase_2,random_amplitude,random_freq):
     # Publisher initialization, done once to avoid re-initializing in the loop
+    rospy.init_node('wrench_simulator', anonymous=False)
+    print("Node initialized")
     wrench_pub = rospy.Publisher("/simulated_wrench", WrenchStamped, queue_size=1)
 
-    rospy.init_node('wrench_simulator', anonymous=False)
     
     # Set the rate at which to publish the message (1000 Hz)
-    publish_rate = 100  # Hz
+    publish_rate = 10  # Hz
     rate = rospy.Rate(publish_rate)
     time_step = 1.0 / publish_rate  # Time step for updates
     
     # Simulation time variable
     t = 0.0
-    
-    # Initialize the time variable for sinusoidal function
-    t = 0 
     
     while not rospy.is_shutdown():
         # Create a WrenchStamped message
@@ -61,5 +59,6 @@ if __name__ == '__main__':
 
         # Call the function to start publishing
         simulated_wrench_function(amplitude, frequency, phase_1,phase_2,random_amplitude,random_freq)
+
     except rospy.ROSInterruptException:
         pass

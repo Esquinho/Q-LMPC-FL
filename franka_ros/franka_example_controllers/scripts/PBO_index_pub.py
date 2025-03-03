@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import rospy
-from franka_msgs.msg import StampedFloat32
+from franka_example_controllers.msg import StampedFloat32
 import threading
 
+print( "Code started")
 # Shared variable for PBO value
 pbo_value = StampedFloat32()
 
@@ -13,8 +14,9 @@ def update_pbo():
     while not rospy.is_shutdown():
         try:
             new_value = float(input("Enter a new PBO value (-1 to 1): "))
+            rospy.loginfo(f"Received new PBO value: {new_value}")
             if -1 <= new_value <= 1:
-                pbo_value.data= new_value
+                pbo_value.data = new_value
             else:
                 rospy.logwarn("Invalid input. Please enter a number between -1 and 1.")
         except ValueError:
@@ -31,7 +33,7 @@ def pbo_publisher():
     pub = rospy.Publisher('PBO_index', StampedFloat32, queue_size=10)
 
     # Set the publishing rate (e.g., 60 Hz)
-    rate = rospy.Rate(100)
+    rate = rospy.Rate(60)
 
     # Start the input thread
     input_thread = threading.Thread(target=update_pbo)

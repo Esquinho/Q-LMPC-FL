@@ -155,8 +155,11 @@ class Q_LMPC():
         self.tictoc = TicToc()
         
         # load data
-        a_file = open("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
-        self.training_dict = pickle.load(a_file)
+    
+        b_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl")
+        b_file = open(b_path, "rb")
+
+        self.training_dict = pickle.load(b_file)
         #self.training_dict = torch.load('tensors.pt')
         self.x_mean_v, self.x_std_v, self.y_mean_v, self.y_std_v = self.training_dict['xy_norm']
         self.xn_train = self.training_dict['xn_train']
@@ -179,7 +182,8 @@ class Q_LMPC():
         self.fh_std  = np.std(self.x_std_v[2:3])
         self.fh_norm = (self.fh_mean, self.fh_std)
         
-        self.Cost_norm = np.load("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        c_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        self.Cost_norm = np.load(c_path)
         self.media_costo, self.stad_cost = self.Cost_norm
 
         # Fuzzy Network Data
@@ -238,7 +242,7 @@ class Q_LMPC():
         
         self.recording_index = 0
         # Define the directory where you want to save the file
-        directory = os.path.join(os.path.expanduser('~'), 'work_space', 'src','Laboratorio', 'Updating strategies', 'Data')
+        directory = os.path.join(os.path.expanduser('~'), 'shared_ws', 'vasco_ws' , 'src','Q-LMPC-FL', 'Laboratorio', 'Updating strategies', 'Data')
 
         # Ensure the directory exists; if it doesn't, create it
         os.makedirs(directory, exist_ok=True)
@@ -248,7 +252,7 @@ class Q_LMPC():
         self.cost_file_name = os.path.join(directory, 'cost_std.npy')
 
         self.critic_norm = os.path.join(directory, 'critic_norm.npy')
-        self.critic_mean, self.critic_std = np.load(self.critic_norm)
+        #self.critic_mean, self.critic_std = np.load(self.critic_norm)
 
         self.velocity_record_=np.zeros((self.buffer_size +1, 1))
         self.pose_record_=np.zeros((self.buffer_size+1, 1))
@@ -399,13 +403,14 @@ class Q_LMPC():
         fh_std_ = x_std_v[2]
         u_mean_ = x_mean_v[3]
         u_std_ = x_std_v[3]
-
+        """
         #Normalization parameters to/from Critic:
+        print(self.critic_mean)
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
-        
+        """
 
         Critic_NN_ = Critic_NN
         Nh_ = Nh
@@ -450,11 +455,11 @@ class Q_LMPC():
 
         #Compute the delta_u, normalize it and make it a tensor
         delta_setpoint_unorm_ = fuzzy_u_[1:Nh_,0] - u_unorm_[1:Nh_,0]
-        delta_setpoint_norm_ = (delta_setpoint_unorm_-critic_delta_u_mean)/critic_delta_u_std
+        delta_setpoint_norm_ = (delta_setpoint_unorm_)
         delta_setpoint_norm_torch_ = torch.tensor(delta_setpoint_norm_, dtype=torch.float32, device=self.Device).unsqueeze(1)
 
         # Normalize fh and make it a tensor
-        fh_norm_ = (fh_unorm_ - critic_fh_mean)/critic_fh_std
+        fh_norm_ = (fh_unorm_ )
         fh_norm_torch = torch.tensor(fh_norm_[1:Nh_], dtype=torch.float32, device=self.Device) 
 
         # Both Tensors are of length (Nh_-1)
@@ -463,9 +468,9 @@ class Q_LMPC():
         combined_input_p1_torch = torch.cat(( fh_norm_torch[1:], delta_setpoint_norm_torch_[1:]), dim=1)
         
         #This code is used to collect the unormalized data for the Critic Input
-        """
-        delta_setpoint_unorm_torch_array = delta_setpoint_unorm_torch.reshape(1, -1)
-        fh_unorm_1d = fh_unorm_[1:]).reshape(1, -1)
+        
+        delta_setpoint_unorm_torch_array = delta_setpoint_norm_torch_.reshape(1, -1)
+        fh_unorm_1d = fh_unorm_[1:].reshape(1, -1)
         
         # Stack them together vertically (along rows)
         new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d])
@@ -490,7 +495,7 @@ class Q_LMPC():
             np.save(file_name_1, new_data_1)
             print("DATA CREATED")
 
-        """
+        
 
         Critic_NN_.to(self.Device)
         optimizer_C = torch.optim.SGD(Critic_NN_.parameters(), lr =learning_rate_)
@@ -505,8 +510,8 @@ class Q_LMPC():
             Q_n = Critic_NN_.forward(combined_input_torch[j,:])
             Q_npiu1 = Critic_NN_.forward(combined_input_p1_torch[j,:]) 
             
-            Cost_fh = ((combined_input_torch[j:j+1,0].unsqueeze(0)).detach().numpy()*critic_fh_std + critic_fh_mean).reshape(1,1,1)
-            Cost_du = ((combined_input_torch[j:j+1,1].unsqueeze(0)).detach().numpy()*critic_delta_u_std + critic_delta_u_mean).reshape(1,1,1)
+            Cost_fh = ((combined_input_torch[j:j+1,0].unsqueeze(0)).detach().numpy()).reshape(1,1,1)
+            Cost_du = ((combined_input_torch[j:j+1,1].unsqueeze(0)).detach().numpy()).reshape(1,1,1)
             
             COSTO = self.cost_func_p(Cost_fh,Cost_du) 
             del Cost_fh, Cost_du
@@ -619,12 +624,13 @@ class Q_LMPC():
         # 16-32 elites are enough with 64-128 samples for: action_dim * time_horizon <= 100
         num_ensembles_ = num_ensembles_cem_
         PBO_index_ = PBO_index
-
+        """
         #Normalization parameters to/from CriticNN:
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
+        """
 
         for k in range(num_ensembles_):
             NN_model_["NN"+str(k)].to(self.Device) 
@@ -710,7 +716,7 @@ class Q_LMPC():
                 force_tt = state_tt_[:,:,2].reshape(-1)
                 force_t = state_t_broadcasted_[:,:,2].reshape(-1)
 
-                fh_critic_norm = (force_tt-critic_fh_mean)/critic_fh_std
+                fh_critic_norm = (force_tt)
 
                 #Compute df and filter it
                 dforce_raw = (force_tt-force_t)*6
@@ -719,24 +725,27 @@ class Q_LMPC():
                 step_cost_ = np.empty_like(np.zeros(num_samples_-1))
                 costo_rete_= np.zeros((num_ensembles_cem_,num_samples_-1))
                 self.critic_NN.eval()
-                fuzzy_action = np.zeros[1,num_samples_]
+
+                fuzzy_action = np.zeros((1, num_samples_))
                 costi_rete_ = []
                 for j1 in range(0,num_samples_-1):
-
+                    rospy.loginfo("Before Fuzzy")
                     action_range = np.zeros(4)
                     for i in range(4):
                         action_range[i]=self.fuzzy_logic(velocity_tt[j1],force_tt[j1],dforce_filt[0,j1,t],PBO_index_[0],i)
                     fuzzy_action[0,j1] = np.sum(action_range)*np.sign(dforce_filt[0,j1,t]) + position_tt[j1]
-
+                    rospy.loginfo("After Fuzzy")
                     # Compute delta_u, and normalize it to be forwared thorugh the Critic:
                     delta_action_unorm_ = fuzzy_action[0,j1]-action_tt_[0,j1]                        
-                    delta_critic_norm = (delta_action_unorm_-critic_delta_u_mean)/critic_delta_u_std
+                    delta_critic_norm = (delta_action_unorm_)
 
                     critic_input_norm_ = np.column_stack((fh_critic_norm[j1], delta_critic_norm))
                     critic_input_norm_torch_ = torch.tensor(critic_input_norm_,dtype=torch.float32,device=self.Device)
+                    rospy.loginfo("Before CC")
 
                     # Pass the combined input to the CriticNN
                     costo_rete_[0, j1] = self.critic_NN.forward(critic_input_norm_torch_)
+                    rospy.loginfo("After CC")
                     #print(f"Cost of input: {critic_input_norm_torch_} was {costo_rete_[0, j1]}")
                     costi_rete_.append(costo_rete_[0,j1].item())
 
@@ -841,10 +850,10 @@ class Q_LMPC():
     def on_shutdown(self):
         """This function will be called when the ROS node shuts down."""
         #print("Shutting down the controller, plotting the losses...")
-        torch.save(self.actor_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/actor_vasco")
-        torch.save(self.critic_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/critic_vasco")              
-        torch.save(self.NN_ensemble["NN" + str(0)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model0_vasco")
-        torch.save(self.NN_ensemble["NN" + str(1)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model1_vasco")
+        torch.save(self.actor_NN.state_dict(), "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/actor_vasco")
+        torch.save(self.critic_NN.state_dict(), "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/critic_vasco")              
+        torch.save(self.NN_ensemble["NN" + str(0)], "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/NN_model0_vasco")
+        torch.save(self.NN_ensemble["NN" + str(1)], "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/NN_model1_vasco")
         #self.plot_losses()
         print("Models saved successfully!")
 
@@ -1056,15 +1065,15 @@ class Q_LMPC():
                 #print("lr_actor", lr_actor)
             rospy.loginfo("Before Model Training")
 
-        
+            
             for n_rete in range(self.ensemble_size):
                 self.model_approximator_train(state_force_norm_tra, u_D_record_tra, self.NN_ensemble["NN" + str(n_rete)], self.buffer_size,
                                               learning_rate = 1e-3)
-            #rospy.loginfo("After Model Training and before Critic Training")
+            rospy.loginfo("After Model Training and before Critic Training")
             self.Critic_train(state_force_norm_tra, u_record_tra, self.time_record, self.PBO_record, self.critic_NN, self.training_dict['xy_norm'], self.Cost_norm, self.buffer_size, 
                          learning_rate = 1e-4)
 
-            #rospy.loginfo("After Critic Training")
+            rospy.loginfo("After Critic Training")
             #print("Critic was trained")
             
             # Your data preparation steps
@@ -1125,7 +1134,13 @@ if __name__=='__main__':
     #print(torch.cuda.get_device_name(0))
     #print(torch.cuda.get_device_properties(0))
     # Loading the Data
-    a_file = open("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
+    
+
+# Correct way to handle the path expansion for ~ (home directory)
+    a_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Normalization/3dataDict_robot.pkl")
+
+    # Now open the file
+    a_file = open(a_path, "rb")
     training_dict = pickle.load(a_file)
     #training_dict = torch.jit.load('tensors.pt')
     x_mean_v, x_std_v, y_mean_v, y_std_v = training_dict['xy_norm']
@@ -1153,11 +1168,13 @@ if __name__=='__main__':
     critic = CriticNN()
     
     # Loading the NN models (comment these lines in case you want to perform your own training)
-    PATH_model0 = "/home/vascomelo/work_space//src/Laboratorio/Updating strategies/Training/NN/model_0"
-    PATH_model1 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/model_1"
-    #PATH_actor = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/actor_vasco"
-    #PATH_critic = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Critic/critic_vasco"
+    PATH_model0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/model_0")
     model_approximator["NN0"].load_state_dict(torch.load(PATH_model0))
+            
+
+    PATH_model1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/model_1")
+    #PATH_actor = "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/Actor/actor_vasco"
+    #PATH_critic = "/home/leon/shared_ws/vasco_ws/src/Q-LMPC_FL/Laboratorio/Updating strategies/Training/Critic/critic_vasco"
     model_approximator["NN1"].load_state_dict(torch.load(PATH_model1))
 
     for i in range(num_ensembles):

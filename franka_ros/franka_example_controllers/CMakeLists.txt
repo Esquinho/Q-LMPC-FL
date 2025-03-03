@@ -28,9 +28,14 @@ find_package(Franka 0.7.0 REQUIRED)
 
 add_message_files(FILES
   JointTorqueComparison.msg
+  FILES
+  StampedFloat32.msg
 )
 
-generate_messages()
+generate_messages(
+  DEPENDENCIES
+  std_msgs  # Add any dependencies your message might have
+)
 
 generate_dynamic_reconfigure_options(
   cfg/compliance_param.cfg
@@ -60,6 +65,7 @@ catkin_package(
     roscpp
   DEPENDS Franka
 )
+
 
 add_library(franka_example_controllers
   src/elbow_example_controller.cpp
@@ -133,7 +139,7 @@ install(FILES franka_example_controllers_plugin.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 catkin_install_python(
-  PROGRAMS scripts/interactive_marker.py scripts/move_to_start.py scripts/dual_arm_interactive_marker.py scripts/fuzzy_controller_test.py scripts/PBO_index_pub.py scripts/Q_LMPC_Fuzzy.py scripts/stair_wrench.py scripts/cosine_wrench.py
+  PROGRAMS scripts/interactive_marker.py scripts/move_to_start.py scripts/dual_arm_interactive_marker.py scripts/fuzzy_controller_test.py scripts/PBO_index_pub.py scripts/Q_LMPC_Fuzzy.py scripts/stair_wrench.py scripts/cosine_wrench.py 
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

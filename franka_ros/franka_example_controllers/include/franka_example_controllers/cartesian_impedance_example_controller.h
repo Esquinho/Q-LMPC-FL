@@ -71,7 +71,11 @@ namespace franka_example_controllers {
         std::unique_ptr<franka_hw::FrankaModelHandle> model_handle_;
         std::vector<hardware_interface::JointHandle> joint_handles_;
 
+<<<<<<< HEAD
         double filter_params_{ 0.5/*0.005*/ };
+=======
+        double filter_params_{ 0.005/*0.005*/ };
+>>>>>>> 89056bee3758f672c71969332f21f26c8f1dd817
         double nullspace_stiffness_{ 20.0 };
         double nullspace_stiffness_target_{ 20.0 };
         const double delta_tau_max_{ 20.0 };
@@ -84,7 +88,6 @@ namespace franka_example_controllers {
         Eigen::Quaterniond orientation_d_;
         Eigen::Vector3d position_d_target_;
         Eigen::Quaterniond orientation_d_target_;
-        Eigen::Vector3d simulated_wrench_;
 
         ros::Publisher franka_EE_pose_pub;
         ros::Publisher franka_EE_velocity_pub;
@@ -135,10 +138,6 @@ namespace franka_example_controllers {
         void equilibriumPoseCallback(const geometry_msgs::PoseStampedConstPtr& msg);
         ros::Subscriber sub_damping_;
         void dampingCallback(const std_msgs::Float64::ConstPtr& msg);
-	    ros::Subscriber sub_stiffness_;
-        void stiffnessCallback(const std_msgs::Float64::ConstPtr& msg);
-        ros::Subscriber sub_simulated_wrench_;
-        void wrenchCallback(const geometry_msgs::WrenchStampedConstPtr& msg);
     };
 
 }  // namespace franka_example_controllers#pragma once

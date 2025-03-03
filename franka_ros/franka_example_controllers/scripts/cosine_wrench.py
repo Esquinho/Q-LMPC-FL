@@ -51,8 +51,8 @@ def simulated_wrench_function(amplitude, frequency, phase_1, phase_2,random_ampl
 if __name__ == '__main__':
     try:
         # Set amplitude and frequency
-        amplitude = 10
-        frequency = 0.4
+        amplitude = 7
+        frequency = 0.2
         phase_1 = random.uniform(0 ,2*math.pi)
         phase_2 = random.uniform(0 ,2*math.pi)
         random_amplitude = random.uniform(0, 0.2)

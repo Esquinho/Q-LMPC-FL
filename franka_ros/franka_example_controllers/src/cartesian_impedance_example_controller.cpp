@@ -520,7 +520,7 @@ namespace franka_example_controllers {
         position_err(1) = pos_imp_t(1) + position_init(1) - position(1);
         position_err(2) = pos_imp_t(2) + position_init(2) - position(2);
         
-        ctrl_velocity = velocity_d_;
+        ctrl_velocity = velocity_d_+ Kpos*position_err;
         
         joint_velocity_d.setZero();
         joint_velocity_d = Jpinv*ctrl_velocity;

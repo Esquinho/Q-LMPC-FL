@@ -71,7 +71,7 @@ namespace franka_example_controllers {
         std::unique_ptr<franka_hw::FrankaModelHandle> model_handle_;
         std::vector<hardware_interface::JointHandle> joint_handles_;
 
-        double filter_params_{ 0.9999/*0.005*/ };
+        double filter_params_{ 0.5/*0.005*/ };
         double nullspace_stiffness_{ 20.0 };
         double nullspace_stiffness_target_{ 20.0 };
         const double delta_tau_max_{ 20.0 };

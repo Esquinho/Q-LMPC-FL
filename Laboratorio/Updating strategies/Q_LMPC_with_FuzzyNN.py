@@ -14,7 +14,7 @@ from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import WrenchStamped
 from franka_msgs.msg import StampedFloat32
-
+from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import OrderedDict
@@ -165,7 +165,7 @@ class Q_LMPC():
         self.tictoc = TicToc()
         
         # load data
-        a_file = open("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
+        a_file = open("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3dataDict_robot_py2.pkl", "rb")
         self.training_dict = pickle.load(a_file)
         #self.training_dict = torch.load('tensors.pt')
         self.x_mean_v, self.x_std_v, self.y_mean_v, self.y_std_v = self.training_dict['xy_norm']
@@ -173,7 +173,7 @@ class Q_LMPC():
         self.yn_train = self.training_dict['yn_train']
 
         # load data for the Fuzzy NN
-        b_file = torch.load('/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth')
+        b_file = torch.load('/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth')
         if "normalization" in b_file:
             self.fuzzy_norm = b_file["normalization"]
             #print("Mean:", self.fuzzy_norm["mean"])
@@ -198,10 +198,9 @@ class Q_LMPC():
         self.fh_std  = np.std(self.x_std_v[2:3])
         self.fh_norm = (self.fh_mean, self.fh_std)
         
-        self.Cost_norm = np.load("/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
+        self.Cost_norm = np.load("/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Normalization/3Cost_robot.npy")
         self.media_costo, self.stad_cost = self.Cost_norm
 
-        
         self.loss_history_critic=[]
         self.loss_history_actor=[]
         # putting it in delta form for learning
@@ -236,8 +235,8 @@ class Q_LMPC():
 
         # Define the full path to the file
         self.file_name = os.path.join(directory, 'recorded_data_med_freq_PBO_test.npy')
-        self.cost_file_name = os.path.join(directory, 'cost_std.npy')
-
+        self.cost_file_name = os.path.join(directory, 'cost_standardization.npy')
+        self.cost_std_record = os.path.join(directory, 'cost_mean_std.npy')
         self.critic_norm = os.path.join(directory, 'critic_norm.npy')
         self.critic_mean, self.critic_std = np.load(self.critic_norm)
 
@@ -263,8 +262,8 @@ class Q_LMPC():
         ense_ = fh_.shape[0] # 5
         
         # weights
-        Q_= 1
-        R = 5
+        Q_= 2
+        R = 1
         
         cost_fh = (np.sum(np.sum(np.multiply(fh_,fh_)*Q_, axis=2).reshape(ense_, N_), axis=0)/ense_).reshape(N_)
         cost_du = (np.sum(np.sum(np.multiply(delta_u_,delta_u_)*R, axis=2).reshape(ense_, N_), axis=0)/ense_).reshape(N_)
@@ -325,10 +324,13 @@ class Q_LMPC():
         u_mean_ = self.action_norm[0]
         u_std_ = self.action_norm[1]
         #print(f"self.critic_mean.shape: {self.critic_mean.shape}")
+        
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
+        
+
         # Fuzzy NN Norm Parameters
 
         fuzzy_mean = self.fuzzy_norm["mean"]
@@ -401,17 +403,17 @@ class Q_LMPC():
         combined_input_torch = torch.cat(( fh_norm_critic_torch[1:-1], delta_setpoint_norm_torch[:-1]), dim=1)
         combined_input_p1_torch = torch.cat(( fh_norm_critic_torch[2:], delta_setpoint_norm_torch[1:]), dim=1)
 
-        """
+        
         delta_setpoint_unorm_torch_array = delta_setpoint_unorm_torch.detach().numpy().reshape(1, -1)
         fh_unorm_1d = np.squeeze(fh_unorm_[1:]).reshape(1, -1)
 
-        print(f"delta_setpoint_unorm_torch_array: {delta_setpoint_unorm_torch_array[:-1]}")
-        print(f"fh_unorm_1d: {fh_unorm_1d[:-1]}")
+        #print(f"delta_setpoint_unorm_torch_array: {delta_setpoint_unorm_torch_array[:-1]}")
+        #print(f"fh_unorm_1d: {fh_unorm_1d[:-1]}")
 
         
         # Stack them together vertically (along rows)
-        new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d])
-        print(f"new_data_1.shape: {new_data_1.shape}")
+        new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d,])
+        #print(f"new_data_1.shape: {new_data_1.shape}")
 
             # Define the filename
         file_name_1 = self.cost_file_name
@@ -423,17 +425,17 @@ class Q_LMPC():
             
             # Append the new data to the existing data
             updated_data = np.hstack((existing_data, new_data_1))
-            print(f"updated_data.shape: {updated_data.shape}")
+            #print(f"updated_data.shape: {updated_data.shape}")
             # Save the updated data back to the file
             np.save(file_name_1, updated_data)
-            print("DATA UPDATED")
+            #print("DATA UPDATED")
         else:
             # If the file doesn't exist, create it by saving the new data
             np.save(file_name_1, new_data_1)
-            print("DATA CREATED")
+            #print("DATA CREATED")
 
-        """
-
+        
+        Cost_record = []
         Critic_NN_.to(self.Device)
         #optimizer_C = torch.optim.Adam(Critic_NN_.get_parameters(), lr =learning_rate_)
         optimizer_C = torch.optim.SGD(Critic_NN_.parameters(), lr =learning_rate_)
@@ -451,18 +453,33 @@ class Q_LMPC():
             Cost_fh = ((combined_input_torch[j:j+1,0].unsqueeze(0)).detach().numpy()*critic_fh_std + critic_fh_mean).reshape(1,1,1)
             Cost_du = ((combined_input_torch[j:j+1,1].unsqueeze(0)).detach().numpy()*critic_delta_u_std + critic_delta_u_mean).reshape(1,1,1)
             
-            COSTO = self.cost_func_p(Cost_fh,Cost_du) # normalization 
+            COSTO = self.cost_func_p(Cost_fh,Cost_du)
+            COSTO_n = COSTO/70.82 # normalization 
             #print("F", Cost_f_0)
             del Cost_fh, Cost_du
-            
-            Q_Bellman = Q_npiu1 + torch.from_numpy(COSTO)
+            Cost_record.append(COSTO)
+
+            Q_Bellman = Q_npiu1 + torch.from_numpy(COSTO_n)
 
             Error_c = errore_f.forward(Q_n, Q_Bellman)
 
             self.loss_history_critic.append(Error_c.item())
             Error_c.backward(retain_graph=True)                          # backprop
-            optimizer_C.step()                             # updating the parameters        
-        
+            optimizer_C.step()  
+                                       # updating the parameters        
+        Cost_record = np.array(Cost_record)
+        if os.path.exists(self.cost_std_record):
+            # Load the existing data
+            existing_data = np.load(self.cost_std_record)
+
+            # Append the new data
+            updated_data = np.vstack((existing_data, Cost_record))
+
+            # Save back to file
+            np.save(self.cost_std_record, updated_data)
+        else:
+            # Save new data if the file doesn't exist
+            np.save(self.cost_std_record, Cost_record)
         return
     
     def ComputationUP(self, xy_norm, state_action_norm_torch_lie, model_approximator, num_ensembles):
@@ -559,7 +576,7 @@ class Q_LMPC():
         state_action_dim_ = action_dim_ + state_dim_ + 1
         smoothing_rate_ = 0.9 #0.9
         iteration_      = 3 #10
-        num_elites_ = 16 #32
+        num_elites_ = 4 #32
         num_ensembles_ = num_ensembles_cem_
         PBO_index_ = PBO_index
         for k in range(num_ensembles_):
@@ -571,12 +588,13 @@ class Q_LMPC():
         mu_matrix_D_  = np.zeros((1, time_horizon_))
         std_matrix_D_ = np.ones((1, time_horizon_))
         PBO_array = np.full((num_ensembles_, num_samples_, 1), PBO_index_)
-
+        
         critic_delta_u_mean = self.critic_mean[0]
         critic_delta_u_std = self.critic_std[0]
         critic_fh_mean = self.critic_mean[1]
         critic_fh_std = self.critic_std[1]
-
+        
+        c0, c1 , c2 ,c3 ,c4 ,c5  = self.Q_interp
         for _ in range(iteration_):
             #rospy.loginfo("Iteration ")
             state_t_broadcasted_ = np.ones((num_ensembles_, num_samples_, state_dim_)) * x_initial_
@@ -664,6 +682,7 @@ class Q_LMPC():
                 fh_critic_norm = (force_tt-critic_fh_mean)/critic_fh_std
                 delta_critic_norm = (delta_action-critic_delta_u_mean)/critic_delta_u_std
 
+
                 #print(f"fh_critic_norm.shape: {fh_critic_norm.shape}")
                 #print(f"delta_critic_norm.shape: {delta_critic_norm.shape}")
 
@@ -674,13 +693,15 @@ class Q_LMPC():
                 critic_input_norm_ = np.column_stack((fh_critic_norm_reshaped, delta_critic_norm))
 
                 #print(f"critic_input_norm_.shape: {critic_input_norm_.shape}")
-                critic_input_norm_torch_ = torch.tensor(critic_input_norm_,dtype=torch.float32,device=self.Device)
+                #critic_input_norm_torch_ = torch.tensor(critic_input_norm_,dtype=torch.float32,device=self.Device)
 
                 Critic_NN.eval()
 
-                for j1 in range(0,critic_input_norm_torch_.shape[0]):
+                for j1 in range(0,critic_input_norm_.shape[0]):
                     costi_rete_ = []
-                    costo_rete_[0,j1] = Critic_NN.forward(critic_input_norm_torch_[j1:j1+1,:]).detach().numpy()
+                    #costo_rete_[0,j1] = Critic_NN.forward(critic_input_norm_torch_[j1:j1+1,:]).detach().numpy()
+                   
+                    costo_rete_[0,j1] = c0 + c1 * critic_input_norm_[j1,0] + c2 * critic_input_norm_[j1,1] + c3 * critic_input_norm_[j1,0]**2 + c4 * critic_input_norm_[j1,1]**2 + c5 * critic_input_norm_[j1,0] * critic_input_norm_[j1,1]
                     costi_rete_.append(costo_rete_[0,j1].item())
                     step_cost_[j1] = (np.sum(costi_rete_)/num_ensembles_cem_)
     
@@ -785,10 +806,16 @@ class Q_LMPC():
     def on_shutdown(self):
         """This function will be called when the ROS node shuts down."""
         #print("Shutting down the controller, plotting the losses...")
-        torch.save(self.actor_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/actor_vasco")
-        torch.save(self.critic_NN.state_dict(), "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/critic_vasco")              
-        torch.save(self.NN_ensemble["NN" + str(0)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model0_vasco")
-        torch.save(self.NN_ensemble["NN" + str(1)], "/home/vascomelo/catkin_ws/src/Laboratorio/Updating strategies/Training/NN_model1_vasco")
+        PATH_actor = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/actor_norm_vasco"
+        PATH_critic = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Critic/critic_norm_vasco"
+        PATH_model0 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/NN_norm_0_vasco"
+        PATH_model1 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/NN_norm_1_vasco"
+
+        torch.save(self.actor_NN.state_dict(), PATH_actor)
+        torch.save(self.critic_NN.state_dict(), PATH_critic)
+        torch.save(self.NN_ensemble["NN" + str(0)].state_dict(), PATH_model0)
+        torch.save(self.NN_ensemble["NN" + str(1)].state_dict(), PATH_model1)
+
         #self.plot_losses()
         print("Models saved successfully!")
 
@@ -869,14 +896,9 @@ class Q_LMPC():
             elif (self.Dr_3 - self.D_old) < -0.3 - 0.2*PBO_index:
                 self.Dr_3 =  self.D_old - 0.3 - 0.2*PBO_index 
             
-            if (self.u_3 ) > 0.65:
-                    self.u_3 = 0.65
-            elif (self.u_3 ) < 0.35:
-                    self.u_3 = 0.35
 
             print(f"vel: {CARTESIAN_VEL[2]}, pos: {CARTESIAN_POSE[2]} , force: {EXTERNAL_FORCES[2]}")
-            print("u_3: ", self.u_3)
-            print("D_informatiom:", self.Dr_3)
+            print("u_3: ", self.u_3,"D_informatiom:", self.Dr_3)
 
             state_action_norm = np.append(actor_input_norm[:,0:3], u_D_3_norm[0,0].detach().numpy())
             state_action_damping_norm = np.append(state_action_norm, u_D_3_norm[0,1].detach().numpy())
@@ -1020,7 +1042,7 @@ class Q_LMPC():
             else:
                 lr_actor = 1e-4  
                 #print("lr_actor", lr_actor)
-            """
+            
             rospy.loginfo("Before Model Training")
             
             for n_rete in range(self.ensemble_size):
@@ -1029,16 +1051,41 @@ class Q_LMPC():
                 
             rospy.loginfo("After Model Training and before Critic Training")
             self.Critic_train(state_force_norm_tra, u_record_tra, self.time_record, self.PBO_record, self.critic_NN, self.fuzzyNN, self.training_dict['xy_norm'], self.Cost_norm, self.buffer_size, 
-                         learning_rate = 1e-4)
+                         learning_rate = 1e-3)
 
             rospy.loginfo("After Critic Training and before Actor Training")
+
+             # Your data preparation steps
+            AAA1 = np.linspace(-10., 10., self.SIZEN)  # Fh
+            AAA2 = np.linspace(-0.1, 0.1, self.SIZEN)  # Delta set-point
+            AAA1n = (AAA1 - self.critic_mean[1])/self.critic_std[1]
+            AAA2n = (AAA2 - self.critic_mean[0])/self.critic_std[0]
+
+            AAA1_grid, AAA2_grid = np.meshgrid(AAA1n, AAA2n)
+
+            # Flatten the grid to create input data (N, 2)
+            AAA = np.column_stack((AAA1_grid.ravel(), AAA2_grid.ravel()))  # Shape: (SIZEN^2, 2)
             
+            BBB = np.zeros(AAA.shape[0])  # Cost
+            InputAAA = torch.tensor(AAA, dtype=torch.float32)
+
+            # Compute all outputs at once
+            BBB = critic.forward(InputAAA).detach().numpy()
+            BBB = BBB.flatten()
+            print("Mean BBB:" , np.mean(BBB))
+            try:
+                self.Q_interp, covariance = curve_fit(self.poly2d, AAA.T, BBB, p0=[0, 0, 0, 0, 0, 0])
+                print("Fitting Critic parameters:", self.Q_interp)
+                #print("Covariance:", covariance)
+            except Exception as e:
+                print(f"Error during curve fitting: {e}")
+
             self.Actor_train(state_force_norm_tra, self.Upper_limit_u_norm,
                              self.Lower_limit_u_norm, self.Upper_limit_D_norm, self.Lower_limit_D_norm, self.fuzzyNN,
                              self.actor_NN, self.NN_ensemble, self.training_dict['xy_norm'], 
                              self.buffer_size, self.PBO_record, lr_actor)
             rospy.loginfo("After Actor training")
-            """
+            
 
             self.z_record_norm = np.zeros((self.buffer_size + 1, 1))
             self.x_record_norm = np.zeros((self.buffer_size + 1, 1))
@@ -1098,8 +1145,8 @@ if __name__=='__main__':
     n_h = 512                                       # size of the hidden layers
     num_ensembles = 2                               # number of NN in the ensemble
     T=3                                             # prediction horizon
-    BS=6                                            # buffer size 
-    N=64                                            # number of samples
+    BS=7                                            # buffer size 
+    N=16                                            # number of samples
     print_loss = True
     dx = yn_train.shape[1]
     model_approximator = OrderedDict()
@@ -1113,14 +1160,13 @@ if __name__=='__main__':
     critic = CriticNN()
     
     # Loading the NN models (comment these lines in case you want to perform your own training)
-    PATH_model0 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/model_0"
-    PATH_model1 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/model_1"
-    PATH_actor = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/actor_vasco"
-    PATH_critic = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/critic_vasco"
-    PATH_fuzzyNN = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth"
+    PATH_actor = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Actor/actor_norm_vasco"
+    PATH_critic = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Critic/critic_norm_vasco"
+    PATH_model0 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/NN_norm_0_vasco"
+    PATH_model1 = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/NN/NN_norm_1_vasco"
+    PATH_fuzzyNN = "/home/vascomelo/work_space/src/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters.pth"
     model_approximator["NN0"].load_state_dict(torch.load(PATH_model0))
     model_approximator["NN1"].load_state_dict(torch.load(PATH_model1))
-
     for i in range(num_ensembles):
         model_approximator["NN" + str(i)].to(Device)
         model_approximator["NN" + str(i)].eval()

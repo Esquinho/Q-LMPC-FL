@@ -152,10 +152,12 @@ class Q_LMPC():
         cartesian_position_sub = message_filters.Subscriber("/franka_ee_pose", PoseStamped, queue_size = 1, buff_size = 2**20) # buffer size = 10, queue = 1
         cartesian_velocity_sub = message_filters.Subscriber("/franka_ee_velocity", TwistStamped, queue_size = 1, buff_size = 2**20)
         wrench_sub = message_filters.Subscriber("/franka_ee_wrench", WrenchStamped, queue_size = 1, buff_size = 2**20)
+        dwrench_sub = message_filters.Subscriber("/franka_ee_dwrench", WrenchStamped, queue_size = 1, buff_size = 2**20)
+
         pbo_sub = message_filters.Subscriber("/PBO_index",StampedFloat32, queue_size = 1, buff_size = 2**20)
         # Subscription to a certain topic and message type
         self.iter_buffer_ = 0
-        sync = message_filters.ApproximateTimeSynchronizer([cartesian_position_sub, cartesian_velocity_sub, wrench_sub, pbo_sub], queue_size = 1, slop = 0.1 )
+        sync = message_filters.ApproximateTimeSynchronizer([cartesian_position_sub, cartesian_velocity_sub, wrench_sub, dwrench_sub,pbo_sub], queue_size = 1, slop = 0.1 )
         #policy used by message_filters::sync::Synchronizer to match messages coming on a set of topics
         sync.registerCallback(self.measurements_callback)
         #In the ROS setting a callback in most cases is a message handler. You define the message handler function and give it to subscribe.
@@ -177,7 +179,7 @@ class Q_LMPC():
         self.yn_train = self.training_dict['yn_train']
 
         # load data for the Fuzzy NN
-        PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_NN_parameters_2.pth")
+        PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_NN_parameters_3.pth")
 
         c_file = torch.load(PATH_fuzzyNN)
         if "normalization" in c_file:
@@ -228,7 +230,7 @@ class Q_LMPC():
         self.Lower_limit_D_norm = np.zeros((self.buffer_size, 1))
         self.PBO_record = np.zeros((self.buffer_size+1, 1))
         self.time_record = np.zeros((self.buffer_size+1, 1))
-        
+        self.force_dot = np.zeros((self.buffer_size + 1, 1))
         
         self.SIZEN = 100
         self.iter_init = 0
@@ -237,7 +239,7 @@ class Q_LMPC():
         
         self.recording_index = 0
         # Define the directory where you want to save the file
-        directory = os.path.join(os.path.expanduser('~'), 'shared_ws', 'vasco_ws' , 'src','Q-LMPC-FL', 'Laboratorio', 'Updating strategies', 'Data')
+        directory = os.path.join(os.path.expanduser('~'), 'shared_ws','vasco_ws', 'src','Q-LMPC-FL', 'Laboratorio', 'Updating strategies', 'Data')
 
         # Ensure the directory exists; if it doesn't, create it
         os.makedirs(directory, exist_ok=True)
@@ -271,7 +273,7 @@ class Q_LMPC():
         ense_ = fh_.shape[0] # 5
         
         # weights
-        Q_= 2
+        Q_= 1
         R = 1
         
         cost_fh = (np.sum(np.sum(np.multiply(fh_,fh_)*Q_, axis=2).reshape(ense_, N_), axis=0)/ense_).reshape(N_)
@@ -319,7 +321,7 @@ class Q_LMPC():
 
         # Input data are normalized
     
-    def Critic_train(self, state_force_train, u_record_train_, timestamp, PBO_record, Critic_NN, Fuzzy_NN, xy_norm, Cost_norm, Nh, learning_rate):
+    def Critic_train(self, state_force_train, dfh_tra, u_record_train_, timestamp, PBO_record, Critic_NN, Fuzzy_NN, xy_norm, Cost_norm, Nh, learning_rate):
         
         #Model App, Actor and Critic Norm Parameters
         x_mean_v, x_std_v, y_mean_v, y_std_v = xy_norm
@@ -344,9 +346,9 @@ class Q_LMPC():
         learning_rate_ = learning_rate
         PBO_record_ = PBO_record
 
-        velocity_norm_ = state_force_train[0:Nh_,0:1] #Shape (Nh_,1)
-        pose_norm_ = state_force_train[0:Nh_,1:2] #Shape (Nh_,1)
-        fh_norm_ = state_force_train[0:Nh_,2:3] #Shape (Nh_,1)
+        velocity_norm_ = state_force_train[:,0] #Shape (Nh_,1)
+        pose_norm_ = state_force_train[:,1] #Shape (Nh_,1)
+        fh_norm_ = state_force_train[:,2] #Shape (Nh_,1)
         u_norm = u_record_train_ #Shape (Nh_,1)
 
         #Exctract Velocity
@@ -355,6 +357,7 @@ class Q_LMPC():
         #Exctract Pose
         pose_unorm_ = (pose_norm_ * pose_std_) + pose_mean_
         pose_unorm_torch_ = torch.tensor(pose_unorm_, dtype=torch.float32, device=self.Device)
+        pose_unorm_torch_ = pose_unorm_torch_.unsqueeze(1)
 
         #Exctract Force
         fh_unorm_ = (fh_norm_*fh_std_)+fh_mean_
@@ -367,86 +370,36 @@ class Q_LMPC():
         
 
         #Compute the dwrench
-        dfh_raw = np.zeros((Nh_-1,1))
-        dft_filtered = np.zeros((Nh_-1,1))
 
-        for i in range(1,Nh_):
-            dfh_raw[i - 1, 0] = (fh_unorm_[i, 0] - fh_unorm_[i - 1, 0]) / (timestamp[i, 0] - timestamp[i - 1, 0])
-            if i==1:
-                dft_filtered[0,0] = 0
-            else:
-                dft_filtered[i-1,0] = self.low_pass_filter(dfh_raw[i - 1, 0],dft_filtered[i - 2, 0])
-
-
+        dft_filtered = dfh_tra[:,0]
+        PBO_record_ = PBO_record_[:,0]
         # Calculate Fuzzy Set-point
         vel_norm_fuzzy = (velocity_unorm_ - self.mean_X [0])/self.std_X[0]
         fh_norm_fuzzy = (fh_unorm_ - self.mean_X [1])/self.std_X[1]
         dfh_norm_fuzzy = (dft_filtered - self.mean_X [2])/self.std_X[2]
         PBO_norm_fuzzy = (PBO_record_- self.mean_X [3])/self.std_X[3]
 
-        #print(f"vel_norm_fuzzy {vel_norm_fuzzy} and velocity_unorm_ {velocity_unorm_}")
-        #print(f"fh_norm_fuzzy {fh_norm_fuzzy} and fh_unorm_ {fh_unorm_}")
-        #print(f"dfh_norm_fuzzy {dfh_norm_fuzzy} and dft_filtered {dft_filtered}")
-        #print(f"PBO_norm_fuzzy {PBO_norm_fuzzy} and PBO_record_ {PBO_record_}")
-
-        fuzzy_input = np.column_stack((vel_norm_fuzzy[1:],fh_norm_fuzzy[1:],dfh_norm_fuzzy,PBO_norm_fuzzy[1:-1]))
+        fuzzy_input = np.column_stack((vel_norm_fuzzy,fh_norm_fuzzy,dfh_norm_fuzzy,PBO_norm_fuzzy))
 
         fuzzy_input_torch = torch.tensor(fuzzy_input, dtype=torch.float32, device=self.Device)
-
         Fuzzy_NN.eval()
-        fuzzy_setpoint_torch = (Fuzzy_NN.forward(fuzzy_input_torch))+ pose_unorm_torch_[1:Nh_,:]
+        delta_fuzzy_setpoint_torch = (Fuzzy_NN.forward(fuzzy_input_torch))
+
+        fuzzy_setpoint_torch = delta_fuzzy_setpoint_torch + pose_unorm_torch_
         
         #print(f"pose_unorm_torch_[1:Nh_,:]: {pose_unorm_torch_[1:Nh_,:]}")
-        #print(f"fuzzy_setpoint_torch: {fuzzy_setpoint_torch}")
         #print(f"u_unorm_torch[1:Nh_,:]: {u_unorm_torch[1:Nh_,:]}")
 
-        delta_setpoint_unorm_torch = (fuzzy_setpoint_torch-u_unorm_torch[1:Nh_,:])
+        delta_setpoint_unorm_torch = (fuzzy_setpoint_torch[:-1]-u_unorm_torch) #(Nh_ -1)
+
         delta_setpoint_norm_torch = (delta_setpoint_unorm_torch-critic_delta_u_mean)/critic_delta_u_std
-        fh_norm_critic_torch = (fh_unorm_torch -critic_fh_mean)/critic_fh_std
-
-        #print(f"fh_norm_torch: {fh_norm_torch[1:-1]}")
-        #print(f"fh_norm_critic_torch: {fh_norm_critic_torch[1:]}")
-
-        #print(f"delta_setpoint_unorm_torch: {delta_setpoint_unorm_torch[:-1]}")
-        #print(f"delta_setpoint_norm_torch: {delta_setpoint_norm_torch[:-1]}")
+        fh_norm_critic_torch = (fh_unorm_torch -critic_fh_mean)/critic_fh_std #(Nh_,)
+        fh_norm_critic_torch = fh_norm_critic_torch.unsqueeze(1)
 
         # Concatenate the tensors
-        combined_input_torch = torch.cat(( fh_norm_critic_torch[1:-1], delta_setpoint_norm_torch[:-1]), dim=1)
-        combined_input_p1_torch = torch.cat(( fh_norm_critic_torch[2:], delta_setpoint_norm_torch[1:]), dim=1)
-
+        combined_input_torch = torch.cat(( fh_norm_critic_torch[:-2], delta_setpoint_norm_torch[:-1]), dim=1)
+        combined_input_p1_torch = torch.cat(( fh_norm_critic_torch[1:-1], delta_setpoint_norm_torch[1:]), dim=1)
         
-        delta_setpoint_unorm_torch_array = delta_setpoint_unorm_torch.detach().numpy().reshape(1, -1)
-        fh_unorm_1d = np.squeeze(fh_unorm_[1:]).reshape(1, -1)
-
-        #print(f"delta_setpoint_unorm_torch_array: {delta_setpoint_unorm_torch_array[:-1]}")
-        #print(f"fh_unorm_1d: {fh_unorm_1d[:-1]}")
-
-        
-        # Stack them together vertically (along rows)
-        new_data_1 = np.vstack([delta_setpoint_unorm_torch_array, fh_unorm_1d])
-        #print(f"new_data_1.shape: {new_data_1.shape}")
-
-            # Define the filename
-        file_name_1 = self.cost_file_name
-
-        # Check if the file exists
-        if os.path.exists(file_name_1):
-            # Load the existing data
-            existing_data = np.load(file_name_1)
-            
-            # Append the new data to the existing data
-            updated_data = np.hstack((existing_data, new_data_1))
-            #print(f"updated_data.shape: {updated_data.shape}")
-            # Save the updated data back to the file
-            np.save(file_name_1, updated_data)
-            #print("DATA UPDATED")
-        else:
-            # If the file doesn't exist, create it by saving the new data
-            np.save(file_name_1, new_data_1)
-            #print("DATA CREATED")
-
-        
-
         Critic_NN_.to(self.Device)
         #optimizer_C = torch.optim.Adam(Critic_NN_.get_parameters(), lr =learning_rate_)
         optimizer_C = torch.optim.SGD(Critic_NN_.parameters(), lr =learning_rate_)
@@ -801,10 +754,10 @@ class Q_LMPC():
         """This function will be called when the ROS node shuts down."""
         #print("Shutting down the controller, plotting the losses...")
 
-        actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_vasco_high_nosat.pth")
-        critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_vasco_high_nosat.pth")
-        model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_vasco_high_nosat.pth")
-        model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_vasco_high_nosat.pth")     
+        actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_3.pth")
+        critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_3.pth")
+        model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_3.pth")
+        model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_3.pth")     
 
         # Save the state dictionaries of the actor and critic models
         #torch.save(self.actor_NN.state_dict(), actor_path)
@@ -830,13 +783,15 @@ class Q_LMPC():
         plt.pause(0.001)  # Non-blocking plot display
 
 
-    def measurements_callback(self, pose, velocity, wrench, pbo):
+    def measurements_callback(self, pose, velocity, wrench, dwrench, pbo):
         # the three inputs should represent three messages
         #print("Function is being triggered")
         if (self.iter_buffer_ < self.buffer_size):
             print("Iter buffer is: ", self.iter_buffer_ ," and buffer size is: ", self.buffer_size )
             # Collection of measured state
             EXTERNAL_FORCES   = np.array([wrench.wrench.force.x, wrench.wrench.force.y, wrench.wrench.force.z])
+
+            D_EXTERNAL_FORCES   = np.array([dwrench.wrench.force.x, dwrench.wrench.force.y, dwrench.wrench.force.z])
             # -wrench.wrench.force.z is used since the Robot measures positive forces when directed backwards, but for this script they are directed upwards
             # now in the impedence node the force has the right convention so the sign remains +
             #print("msg.Wrench: ", EXTERNAL_FORCES)
@@ -868,6 +823,7 @@ class Q_LMPC():
             x_norm = np.array([ (CARTESIAN_POSE[2]-self.x_mean_v[1])/self.x_std_v[1] ])
             fh_norm = np.array([ (EXTERNAL_FORCES[2]-self.x_mean_v[2])/self.x_std_v[2] ])
 
+            dfh = D_EXTERNAL_FORCES[2]
             "Set point generation throught Neural Network"
 
             actor_input_norm = np.array([z_norm, x_norm, fh_norm, PBO_index], dtype=np.float32).T
@@ -926,6 +882,7 @@ class Q_LMPC():
             self.fh_record_not_norm[self.iter_buffer_,0] = wrench.wrench.force.z
             self.PBO_record[self.iter_buffer_,0] = PBO_index
             self.time_record[self.iter_buffer_,0]= Timestamp
+            self.force_dot[self.iter_buffer_,0] = dfh
                 
             u_message = geometry_msgs.msg.PoseStamped()
 
@@ -980,6 +937,7 @@ class Q_LMPC():
             self.fh_record_norm[self.iter_buffer_,0] = fh_norm
             self.PBO_record[self.iter_buffer_,0] = PBO_index
             self.time_record[self.iter_buffer_,0]= Timestamp
+            self.force_dot[self.iter_buffer_,0] = dfh
 
             self.velocity_record_[self.recording_index,0] =  np.array([CARTESIAN_VEL[2]])
             self.pose_record_[self.recording_index,0] =  np.array([CARTESIAN_POSE[2]])
@@ -995,6 +953,7 @@ class Q_LMPC():
             fh_record_tra = self.fh_record_norm
             state_norm_tra = np.append(z_tra, x_tra, axis=1)
             state_force_norm_tra = np.append(state_norm_tra, fh_record_tra, axis=1)
+            dfh_tra = self.force_dot
 
             u_record_tra = self.u_record_norm
             u_D_record_tra = np.append(u_record_tra,self.D_record_norm, axis=1)
@@ -1063,7 +1022,7 @@ class Q_LMPC():
             else:
                 lr_actor = 1e-4  
                 #print("lr_actor", lr_actor)
-            """
+           
             rospy.loginfo("Before Model Training")
             
             for n_rete in range(self.ensemble_size):
@@ -1071,7 +1030,11 @@ class Q_LMPC():
                                               learning_rate = 1e-3)
                 
             rospy.loginfo("After Model Training and before Critic Training")
-            self.Critic_train(state_force_norm_tra, u_record_tra, self.time_record, self.PBO_record, self.critic_NN, self.fuzzyNN, self.training_dict['xy_norm'], self.Cost_norm, self.buffer_size, 
+            #print(f"state_force_norm_tra.shape: {state_force_norm_tra.shape}")
+            print(f"u_record_tra.shape: {u_record_tra.shape}")
+
+
+            self.Critic_train(state_force_norm_tra, dfh_tra, u_record_tra, self.time_record, self.PBO_record, self.critic_NN, self.fuzzyNN, self.training_dict['xy_norm'], self.Cost_norm, self.buffer_size, 
                          learning_rate = 1e-5)
 
             rospy.loginfo("After Critic Training and before Actor Training")
@@ -1081,7 +1044,6 @@ class Q_LMPC():
                              self.actor_NN, self.NN_ensemble, self.training_dict['xy_norm'], 
                              self.buffer_size, self.PBO_record, lr_actor)
             rospy.loginfo("After Actor training")
-            """
 
             self.z_record_norm = np.zeros((self.buffer_size + 1, 1))
             self.x_record_norm = np.zeros((self.buffer_size + 1, 1))
@@ -1094,6 +1056,7 @@ class Q_LMPC():
             self.Lower_limit_D_norm = np.zeros((self.buffer_size, 1))
             self.PBO_record = np.zeros((self.buffer_size+ 1, 1))
             self.time_record = np.zeros((self.buffer_size+ 1, 1))
+            self.force_dot = np.zeros((self.buffer_size+ 1, 1))
 
             self.velocity_record_=np.zeros((self.buffer_size+1, 1))
             self.pose_record_=np.zeros((self.buffer_size+1, 1))
@@ -1156,16 +1119,16 @@ if __name__=='__main__':
     actor = ActorNN()
     critic = CriticNN()
     
-    actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_vasco_high.pth")
-    critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_vasco_high.pth")
-    model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_vasco_high.pth")
-    model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_vasco_high.pth")     
+    actor_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Actor/actor_3.pth")
+    critic_path = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Critic/critic_3.pth")
+    model_0 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN0_3.pth")
+    model_1 = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/NN/NN1_3.pth")     
 
 
-    PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/Fuzzy/fuzzy_NN_parameters_high.pth")
+    PATH_fuzzyNN = os.path.expanduser("~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_NN_parameters_3.pth")
 
-    model_approximator["NN0"].load_state_dict(torch.load(model_0))
-    model_approximator["NN1"].load_state_dict(torch.load(model_1))
+    #model_approximator["NN0"].load_state_dict(torch.load(model_0))
+    #model_approximator["NN1"].load_state_dict(torch.load(model_1))
 
     for i in range(num_ensembles):
         model_approximator["NN" + str(i)].to(Device)
@@ -1176,8 +1139,8 @@ if __name__=='__main__':
     critic = CriticNN().to(Device)
 
     fuzzy.load_state_dict(torch.load(PATH_fuzzyNN, weights_only=False)["model_state_dict"]) #comment in case you want to perform your own training
-    actor.load_state_dict(torch.load(actor_path)) #comment in case you want to perform your own training
-    critic.load_state_dict(torch.load(critic_path)) #comment in case you want to perform your own training
+    #actor.load_state_dict(torch.load(actor_path)) #comment in case you want to perform your own training
+    #critic.load_state_dict(torch.load(critic_path)) #comment in case you want to perform your own training
     
     print("QLMPC controller is starting")
     myController = Q_LMPC(Device, model_approximator, fuzzy, actor, critic, num_ensembles, T, BS, N)

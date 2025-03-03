@@ -90,6 +90,7 @@ namespace franka_example_controllers {
         ros::Publisher franka_EE_wrench_pub;
 	    ros::Publisher franka_q_pose_pub;
         ros::Publisher franka_q_velocity_pub;
+        ros::Publisher franka_EE_dwrench_pub;
         int cont_task_setpoint;
 
         double msrTimestep;
@@ -97,7 +98,7 @@ namespace franka_example_controllers {
         double digfilt;
         std::array<double, 7> dq_filt;
 
-        Eigen::Vector3d position_old, dposition, rpy_old, drpy, rpy_cmd, drpy_cmd, dw_psp_world, drpy_filt, dposition_filt;
+        Eigen::Vector3d position_old, dposition, rpy_old, drpy, rpy_cmd, drpy_cmd, dw_psp_world, drpy_filt, dposition_filt, drpy_force,rpy_force_old,dforce,force_old,dforce_filt,drpy_force_filt;
         Eigen::Vector3d rpy_init, vel_imp_t, pos_imp_t, vel_imp_r, pos_imp_r, w_psp_world;
         Eigen::Vector3d position_init;
         Eigen::Matrix<double, 6, 6> Kpos;

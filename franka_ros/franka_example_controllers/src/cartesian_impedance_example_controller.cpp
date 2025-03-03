@@ -46,6 +46,7 @@ namespace franka_example_controllers {
         franka_EE_pose_pub = node_handle.advertise<geometry_msgs::PoseStamped>("/franka_ee_pose", 20);
         franka_EE_velocity_pub = node_handle.advertise<geometry_msgs::TwistStamped>("/franka_ee_velocity", 20);
         franka_EE_wrench_pub = node_handle.advertise<geometry_msgs::WrenchStamped>("/franka_ee_wrench", 20); // 1000
+        franka_EE_dwrench_pub = node_handle.advertise<geometry_msgs::WrenchStamped>("/franka_ee_dwrench", 20); // 1000
         franka_q_velocity_pub = node_handle.advertise<geometry_msgs::PoseStamped>("/franka_q_velocity", 20);
         franka_q_pose_pub = node_handle.advertise<geometry_msgs::PoseStamped>("/franka_q_pose", 20); // 1000
 
@@ -209,6 +210,14 @@ namespace franka_example_controllers {
             position_old(j) = 0.;
             dposition_filt(j) = 0.;
             drpy_filt(j) = 0.;
+
+            drpy_force(j) = 0.;
+            rpy_force_old(j) = 0.;
+            dforce(j) = 0.;
+            force_old(j) = 0.;
+            dforce_filt(j) = 0.;
+            drpy_force_filt(j) = 0.;
+
         }
 
         for (int j = 0; j < 7; ++j)
@@ -416,6 +425,24 @@ namespace franka_example_controllers {
 
         franka_EE_wrench_pub.publish(wrench_msg);
 
+        for (int j = 0; j < 3; ++j)
+        {
+            dforce(j) = (ext_wrench_t(j) - force_old(j)) / 0.001;
+            dforce_filt(j) = dposition_filt(j) * digfilt + (1 - digfilt) * dforce(j);
+            drpy_force(j) = (ext_wrench_r(j) - rpy_force_old(j)) / 0.001;
+            drpy_force_filt(j) = drpy_force_filt(j) * digfilt + (1 - digfilt) * drpy_force(j);
+        }
+
+        geometry_msgs::WrenchStamped dwrench_msg;
+        dwrench_msg.wrench.force.x = dforce_filt(0);
+        dwrench_msg.wrench.force.y = dforce_filt(1);
+        dwrench_msg.wrench.force.z = dforce_filt(2);
+        dwrench_msg.wrench.torque.x = drpy_force_filt(0);
+        dwrench_msg.wrench.torque.y = drpy_force_filt(1);
+        dwrench_msg.wrench.torque.z = drpy_force_filt(2);
+
+        franka_EE_dwrench_pub.publish(dwrench_msg);
+
         position_d_ = filter_params_ * position_d_target_ + (1.0 - filter_params_) * position_d_;
 
         // if (cont_task_setpoint < 5000)
@@ -432,6 +459,9 @@ namespace franka_example_controllers {
         position_old = position;
         rpy_old = rpy;
         damping_old = damping_importato;
+        rpy_force_old = ext_wrench_r;
+        force_old = ext_wrench_t;
+        
 
         Eigen::Vector3d acc_imp_t, acc_imp_r;
 

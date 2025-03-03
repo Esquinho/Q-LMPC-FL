@@ -39,8 +39,8 @@ class FuzzyLogic:
             Al_med_min = 0.025 + 0.01 * PBO_index_
             Al_med_max = 0.045 + 0.01 * PBO_index_
             Al_med_mid = np.mean((Al_med_min,Al_med_max))
-            Al_high_min = 0.040 + 0.01 * PBO_index_
-            Al_high_max = 0.070 + 0.01* PBO_index_
+            Al_high_min = 0.040 + 0.02 * PBO_index_
+            Al_high_max = 0.070 + 0.02* PBO_index_
             Al_high_mid = np.mean((Al_high_min,Al_high_max))
 
             #print(f"self.Al_med_min shape: {self.Al_med_min.shape}")
@@ -100,11 +100,11 @@ class FuzzyLogic:
         PBO_range = np.linspace(-1, 1, 10)  # For PBO_index_
         
         # Generate evenly spaced sample inputs
-        v_array = np.linspace(-self.v_max, self.v_max, 10)
-        f_array = np.linspace(-30, 30, 10)
-        f_dot_array = np.linspace(-10, 10, 10)
+        v_array = np.linspace(-self.v_max, self.v_max, 15)
+        f_array = np.linspace(-15, 15, 15)
+        f_dot_array = np.linspace(-40, 40, 15)
 
-        save_path = os.path.expanduser('~/shared_ws/vasco_ws/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_samples_2.csv')
+        save_path = os.path.expanduser('~/work_space_robot/src/Q-LMPC-FL/Laboratorio/Updating strategies/Training/fuzzy_samples_3.csv')
 
         # Ensure the directory exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -123,7 +123,7 @@ class FuzzyLogic:
                         for f_dot in f_dot_array:
                             total_AL = 0  # Initialize total assistance level
                             i += 1
-                            print("\nTotal samples generated: ", i)
+                            #print("\nTotal samples generated: ", i)
                             for range_index in range(len(self.velocity_ranges)):
                                 # Calculate fuzzy logic output and shaping factor
                                 assistance_level = self.fuzzy_logic(abs(v), abs(f), abs(f_dot), PBO_index, range_index)
@@ -133,8 +133,11 @@ class FuzzyLogic:
                             
                             # Write sample data to file
                             AL = total_AL * np.sign(f_dot)
-                            print(f"vel: {v}, for: {f}, dfor: {f_dot} ")
-                            print(f"AL: {AL} ")
+                            
+                            if i%10==0: 
+                                print("\nTotal samples generated: ", i)
+                                print(f"vel: {v}, for: {f}, dfor: {f_dot}, PBO: {PBO_index} ")
+                                print(f"AL: {AL} ")
 
                             writer.writerow([v, f, f_dot, PBO_index, AL])
 
